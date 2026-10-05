@@ -11,9 +11,10 @@ This project is the 2026 successor to the original `dewey-converter-for-libraryt
 1. Export your own LibraryThing catalogue as **Tab-Delimited Text** or **JSON**.
 2. Open Dewey Helper in your browser and select the export.
 3. The app extracts ISBNs locally.
-4. When you press **Find Dewey numbers**, it sends batched ISBN searches to the public Open Library Search API.
-5. It shows the current LibraryThing DDC beside the best free-data candidate, with a confidence/review status.
-6. You can edit suggestions and export the reviewed results as TSV, CSV or JSON.
+4. When you press **Find Dewey numbers**, it sends batched ISBN lookups to Open Library.
+5. It checks the exact ISBN edition first using Open Library's multi-book Books API. If that exact edition has no DDC, it can use Open Library's work-level Search API as a clearly labelled fallback.
+6. It shows the current LibraryThing DDC beside the best free-data candidate, with a confidence/review status.
+7. You can edit suggestions and export the reviewed results as TSV, CSV or JSON.
 
 Your original export is never modified.
 
@@ -31,10 +32,15 @@ LibraryThing currently provides user catalogue exports but no supported API for 
 
 The free version uses [Open Library](https://openlibrary.org/) because it provides open, public book metadata and can return Dewey values when they exist in its records.
 
+Lookup order:
+
+1. **Exact edition first:** a batched Books API request checks the specific ISBN and uses its edition-level `dewey_decimal_class` when present.
+2. **Work-level fallback:** if the exact edition has no Dewey value, the Search API may return DDC values aggregated across editions of the ISBN-matched work. These are always marked **Needs review** and are never presented as exact-edition classifications.
+
 Open Library asks apps not to make hundreds of single-book calls. Dewey Helper therefore:
 
-- batches ISBNs into Search API requests;
-- waits between network calls;
+- batches ISBNs;
+- waits at least about one second between Open Library requests;
 - caches prior responses locally;
 - does not automatically retry unresolved books via high-volume fuzzy searches.
 
@@ -42,7 +48,7 @@ A result is a **cataloguing aid, not an authority record**. DDC can vary by edit
 
 ## LibraryThing export
 
-LibraryThing currently offers Excel, Tab-Delimited Text, JSON and MARC exports. **Tab-Delimited Text is recommended** here because it contains rich catalogue fields and is easy to process without third-party code.
+LibraryThing currently offers Excel, Tab-Delimited Text, JSON and MARC exports at https://www.librarything.com/export. **Tab-Delimited Text is recommended** here because it contains rich catalogue fields and is easy to process without third-party code.
 
 Typical LibraryThing export fields include:
 
@@ -85,7 +91,7 @@ You can also open `index.html` directly, although browsers sometimes apply stric
 
 ## Limitations
 
-Open Library does not have a Dewey number for every ISBN. Some records contain multiple DDC values. Those cases are intentionally marked for review rather than silently guessed.
+Open Library does not have a Dewey number for every ISBN. Some exact editions have no DDC even when another edition of the same work does. Work-level fallbacks and multiple candidate DDC values are intentionally marked for review rather than silently treated as authoritative.
 
 This tool currently does not write data back into LibraryThing. A supported LibraryThing member-book editing API would be the right way to add that in future.
 
