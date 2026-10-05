@@ -4,6 +4,7 @@ const OPEN_LIBRARY_BOOKS = "https://openlibrary.org/api/books";
 const OPEN_LIBRARY_SEARCH = "https://openlibrary.org/search.json";
 const SHEETJS_URL = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
 const CACHE_KEY = "dewey-helper-cache-v2";
+const COMPLETED_KEY = "dewey-helper-completed-v1";
 const CACHE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const BATCH_SIZE = 20;
 const REQUEST_DELAY_MS = 1100;
@@ -19,7 +20,8 @@ const state = {
   cancelled: false,
   running: false,
   page: 0,
-  cache: loadCache()
+  cache: loadCache(),
+  completed: loadCompleted()
 };
 
 const els = {
@@ -159,7 +161,8 @@ function normaliseRecord(row, index) {
   const title = pickValue(row, headerMap, ["title", "booktitle"]);
   const author = pickValue(row, headerMap, ["primaryauthor", "author", "authorfirstlast", "authorlastfirst"]);
   const currentDewey = pickValue(row, headerMap, ["deweydecimal", "dewey", "ddc", "deweymelvil"]);
-  const bookId = pickValue(row, headerMap, ["bookid", "id", "workid"]);
+  const bookId = pickValue(row, headerMap, ["bookid", "id"]);
+  const workId = pickValue(row, headerMap, ["workid"]);
 
   const isbnText = [
     pickValue(row, headerMap, ["isbn"]),
@@ -176,6 +179,7 @@ function normaliseRecord(row, index) {
     title: cleanText(title),
     author: cleanText(author),
     bookId: cleanText(bookId),
+    workId: cleanText(workId),
     isbn: valid[0] || "",
     allIsbns: valid,
     currentDewey: cleanText(currentDewey),
@@ -186,7 +190,8 @@ function normaliseRecord(row, index) {
     source: "",
     sourceUrl: "",
     sourceTitle: "",
-    note: valid.length ? "Not looked up yet." : "No valid ISBN found in the export."
+    note: valid.length ? "Not looked up yet." : "No valid ISBN found in the export.",
+    completed: isCompleted(cleanText(bookId), valid[0] || "")
   };
 }
 
@@ -520,7 +525,7 @@ function updateSummary() {
 
 function renderTable() {
   if (!state.records.length) {
-    els.resultsBody.innerHTML = '<tr><td colspan="7" class="empty-state">Load a catalogue to begin.</td></tr>';
+    els.resultsBody.innerHTML = '<tr><td colspan="8" class="empty-state">Load a catalogue to begin.</td></tr>';
     els.resultCount.textContent = "";
     els.pagination.hidden = true;
     return;
@@ -530,6 +535,24 @@ function renderTable() {
   const filtered = state.records.filter(record => {
     if (filter === "all") return true;
     if (filter === "suggested") return Boolean(record.suggestedDewey);
+    if (filter === "completed") return record.completed;
+    if (filter === "exact-changed") {
+      return !record.completed &&
+        record.source === "Open Library exact edition" &&
+        Boolean(record.suggestedDewey) &&
+        !deweyValuesEqual(record.currentDewey, record.suggestedDewey);
+    }
+    if (filter === "missing-current") {
+      return !record.completed &&
+        !cleanDewey(record.currentDewey) &&
+        Boolean(record.suggestedDewey);
+    }
+    if (filter === "already-correct") {
+      return !record.completed &&
+        Boolean(record.currentDewey) &&
+        Boolean(record.suggestedDewey) &&
+        deweyValuesEqual(record.currentDewey, record.suggestedDewey);
+    }
     return record.status === filter;
   });
 
@@ -542,7 +565,7 @@ function renderTable() {
   els.resultsBody.innerHTML = "";
 
   if (!pageRecords.length) {
-    els.resultsBody.innerHTML = '<tr><td colspan="7" class="empty-state">No records match this filter.</td></tr>';
+    els.resultsBody.innerHTML = '<tr><td colspan="8" class="empty-state">No records match this filter.</td></tr>';
   } else {
     const fragment = document.createDocumentFragment();
     for (const record of pageRecords) fragment.appendChild(renderRow(record));
@@ -614,10 +637,143 @@ function renderRow(record) {
     evidenceTd.appendChild(link);
   }
 
-  [statusTd, titleTd, authorTd, isbnTd, currentTd, suggestedTd, evidenceTd]
+  const libraryThingTd = document.createElement("td");
+  libraryThingTd.className = "librarything-actions";
+  const editUrl = getLibraryThingEditUrl(record);
+
+  if (record.suggestedDewey && editUrl) {
+    const writebackButton = document.createElement("button");
+    writebackButton.type = "button";
+    writebackButton.className = "button primary small";
+    writebackButton.textContent = "Copy DDC + Edit";
+    writebackButton.addEventListener("click", () => copyAndOpenLibraryThing(record, writebackButton));
+    libraryThingTd.appendChild(writebackButton);
+  } else if (editUrl) {
+    const editLink = document.createElement("a");
+    editLink.className = "button quiet small link-button";
+    editLink.href = editUrl;
+    editLink.target = "_blank";
+    editLink.rel = "noopener noreferrer";
+    editLink.textContent = "Edit in LibraryThing";
+    libraryThingTd.appendChild(editLink);
+  }
+
+  const completedLabel = document.createElement("label");
+  completedLabel.className = "completed-toggle";
+  const completedBox = document.createElement("input");
+  completedBox.type = "checkbox";
+  completedBox.checked = record.completed;
+  completedBox.addEventListener("change", () => {
+    record.completed = completedBox.checked;
+    setCompleted(record, completedBox.checked);
+    renderTable();
+  });
+  const completedText = document.createElement("span");
+  completedText.textContent = "Completed";
+  completedLabel.appendChild(completedBox);
+  completedLabel.appendChild(completedText);
+  libraryThingTd.appendChild(completedLabel);
+
+  [statusTd, titleTd, authorTd, isbnTd, currentTd, suggestedTd, evidenceTd, libraryThingTd]
     .forEach(td => tr.appendChild(td));
 
   return tr;
+}
+
+function deweyValuesEqual(a, b) {
+  const left = cleanDewey(a);
+  const right = cleanDewey(b);
+  return Boolean(left && right && left === right);
+}
+
+function getLibraryThingEditUrl(record) {
+  const bookId = String(record.bookId || "").trim();
+  const workId = String(record.workId || "").trim();
+
+  if (!bookId) return "";
+  if (workId) {
+    return `https://www.librarything.com/work/${encodeURIComponent(workId)}/edit/${encodeURIComponent(bookId)}`;
+  }
+  return `https://www.librarything.com/work/edit/${encodeURIComponent(bookId)}`;
+}
+
+async function copyAndOpenLibraryThing(record, button) {
+  const value = cleanDewey(record.suggestedDewey) || String(record.suggestedDewey || "").trim();
+  const url = getLibraryThingEditUrl(record);
+  if (!value || !url) return;
+
+  const popup = window.open(url, "_blank", "noopener,noreferrer");
+  let copied = false;
+
+  try {
+    await navigator.clipboard.writeText(value);
+    copied = true;
+  } catch (error) {
+    console.warn("Clipboard API unavailable", error);
+    copied = fallbackCopy(value);
+  }
+
+  if (!popup) {
+    window.location.href = url;
+  }
+
+  const original = button.textContent;
+  button.textContent = copied ? "Copied · LibraryThing opened" : "LibraryThing opened";
+  setTimeout(() => { button.textContent = original; }, 1800);
+}
+
+function fallbackCopy(value) {
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    textarea.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function completionKey(recordOrBookId, isbn = "") {
+  const bookId = typeof recordOrBookId === "object"
+    ? String(recordOrBookId.bookId || "").trim()
+    : String(recordOrBookId || "").trim();
+  const itemIsbn = typeof recordOrBookId === "object"
+    ? String(recordOrBookId.isbn || "").trim()
+    : String(isbn || "").trim();
+  return bookId ? `book:${bookId}` : itemIsbn ? `isbn:${itemIsbn}` : "";
+}
+
+function loadCompleted() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(COMPLETED_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isCompleted(bookId, isbn) {
+  const key = completionKey(bookId, isbn);
+  return Boolean(key && state?.completed?.[key]);
+}
+
+function setCompleted(record, value) {
+  const key = completionKey(record);
+  if (!key) return;
+  if (value) state.completed[key] = true;
+  else delete state.completed[key];
+
+  try {
+    localStorage.setItem(COMPLETED_KEY, JSON.stringify(state.completed));
+  } catch (error) {
+    console.warn("Could not persist completed state", error);
+  }
 }
 
 function makeBadge(record) {
@@ -658,7 +814,9 @@ function exportDelimited(delimiter, extension) {
     "Dewey_Helper_Confidence",
     "Dewey_Helper_Source",
     "Dewey_Helper_Source_URL",
-    "Dewey_Helper_Note"
+    "Dewey_Helper_Note",
+    "Dewey_Helper_LibraryThing_Edit_URL",
+    "Dewey_Helper_Completed"
   ];
 
   const originalHeaders = state.headers.length ? state.headers : deriveHeaders(state.records.map(r => r.original));
@@ -675,7 +833,9 @@ function exportDelimited(delimiter, extension) {
       Dewey_Helper_Confidence: record.confidence,
       Dewey_Helper_Source: record.source,
       Dewey_Helper_Source_URL: record.sourceUrl,
-      Dewey_Helper_Note: record.note
+      Dewey_Helper_Note: record.note,
+      Dewey_Helper_LibraryThing_Edit_URL: getLibraryThingEditUrl(record),
+      Dewey_Helper_Completed: record.completed ? "yes" : "no"
     };
 
     const row = headers.map(header => {
@@ -702,7 +862,9 @@ function exportJson() {
     Dewey_Helper_Confidence: record.confidence,
     Dewey_Helper_Source: record.source,
     Dewey_Helper_Source_URL: record.sourceUrl,
-    Dewey_Helper_Note: record.note
+    Dewey_Helper_Note: record.note,
+    Dewey_Helper_LibraryThing_Edit_URL: getLibraryThingEditUrl(record),
+    Dewey_Helper_Completed: record.completed
   }));
 
   downloadBlob(JSON.stringify(output, null, 2), "dewey-helper-results.json", "application/json;charset=utf-8");
