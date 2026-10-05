@@ -513,7 +513,7 @@ function applyResolution(records, resolution, fromCache) {
 
 function updateSummary() {
   const withIsbn = state.records.filter(record => record.isbn).length;
-  const withDewey = state.records.filter(record => record.currentDewey).length;
+  const withDewey = state.records.filter(record => Boolean(cleanDewey(record.currentDewey))).length;
   const unique = [...new Set(state.records.map(record => record.isbn).filter(Boolean))];
   const cached = unique.filter(isbn => Boolean(getCached(isbn))).length;
 
@@ -534,7 +534,7 @@ function renderTable() {
   const filter = els.filterSelect.value;
   const filtered = state.records.filter(record => {
     if (filter === "all") return true;
-    if (filter === "suggested") return Boolean(record.suggestedDewey);
+    if (filter === "suggested") return !record.completed && Boolean(record.suggestedDewey);
     if (filter === "completed") return record.completed;
     if (filter === "exact-changed") {
       return !record.completed &&
@@ -553,7 +553,7 @@ function renderTable() {
         Boolean(record.suggestedDewey) &&
         deweyValuesEqual(record.currentDewey, record.suggestedDewey);
     }
-    return record.status === filter;
+    return !record.completed && record.status === filter;
   });
 
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -580,6 +580,7 @@ function renderTable() {
 
 function renderRow(record) {
   const tr = document.createElement("tr");
+  if (record.completed) tr.classList.add("completed-row");
 
   const statusTd = document.createElement("td");
   statusTd.appendChild(makeBadge(record));
@@ -648,13 +649,15 @@ function renderRow(record) {
     writebackButton.textContent = "Copy DDC + Edit";
     writebackButton.addEventListener("click", () => copyAndOpenLibraryThing(record, writebackButton));
     libraryThingTd.appendChild(writebackButton);
-  } else if (editUrl) {
+  }
+
+  if (editUrl) {
     const editLink = document.createElement("a");
     editLink.className = "button quiet small link-button";
     editLink.href = editUrl;
     editLink.target = "_blank";
     editLink.rel = "noopener noreferrer";
-    editLink.textContent = "Edit in LibraryThing";
+    editLink.textContent = record.suggestedDewey ? "Open edit page" : "Edit in LibraryThing";
     libraryThingTd.appendChild(editLink);
   }
 
@@ -702,9 +705,15 @@ async function copyAndOpenLibraryThing(record, button) {
   const url = getLibraryThingEditUrl(record);
   if (!value || !url) return;
 
-  const popup = window.open(url, "_blank", "noopener,noreferrer");
-  let copied = false;
+  let popup = null;
+  try {
+    popup = window.open(url, "_blank");
+    if (popup) popup.opener = null;
+  } catch (error) {
+    console.warn("Could not open LibraryThing in a new tab", error);
+  }
 
+  let copied = false;
   try {
     await navigator.clipboard.writeText(value);
     copied = true;
@@ -713,13 +722,13 @@ async function copyAndOpenLibraryThing(record, button) {
     copied = fallbackCopy(value);
   }
 
-  if (!popup) {
-    window.location.href = url;
-  }
-
   const original = button.textContent;
-  button.textContent = copied ? "Copied · LibraryThing opened" : "LibraryThing opened";
-  setTimeout(() => { button.textContent = original; }, 1800);
+  if (popup) {
+    button.textContent = copied ? "Copied · LibraryThing opened" : "LibraryThing opened";
+  } else {
+    button.textContent = copied ? "Copied · tap Open edit page" : "Tap Open edit page";
+  }
+  setTimeout(() => { button.textContent = original; }, 2200);
 }
 
 function fallbackCopy(value) {
@@ -780,7 +789,10 @@ function makeBadge(record) {
   const span = document.createElement("span");
   span.className = "badge neutral";
 
-  if (record.status === "suggested") {
+  if (record.completed) {
+    span.textContent = "Completed";
+    span.className = "badge good";
+  } else if (record.status === "suggested") {
     span.textContent = record.confidence === "high" ? "High confidence" : "Suggested";
     span.className = "badge good";
   } else if (record.status === "review") {
