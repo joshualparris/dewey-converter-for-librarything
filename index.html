@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Free browser tool for reviewing Dewey Decimal suggestions from LibraryThing exports using Open Library data.">
+  <meta name="theme-color" content="#173f36">
+  <title>Dewey Helper for LibraryThing</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="site-header">
+    <div class="wrap">
+      <p class="eyebrow">Free · open source · no login</p>
+      <h1>Dewey Helper for LibraryThing</h1>
+      <p class="lede">Upload your own LibraryThing export, find Dewey candidates from Open Library, review them, and export a clean working file.</p>
+    </div>
+  </header>
+
+  <main id="main" class="wrap stack">
+    <section class="notice" aria-labelledby="privacy-title">
+      <div>
+        <h2 id="privacy-title">Your catalogue stays on your device</h2>
+        <p>The file is parsed in this browser. Only ISBNs are sent to the Open Library API when you press <strong>Find Dewey numbers</strong>. No LibraryThing password is needed or accepted.</p>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="step1-title">
+      <div class="step-heading">
+        <span class="step-number">1</span>
+        <div>
+          <h2 id="step1-title">Load your catalogue</h2>
+          <p>In LibraryThing choose <strong>Export → Tab-Delimited Text</strong> or JSON. TSV is recommended.</p>
+        </div>
+      </div>
+
+      <label class="file-drop" id="dropZone">
+        <input id="fileInput" type="file" accept=".tsv,.txt,.csv,.json,text/tab-separated-values,text/csv,application/json">
+        <span class="file-drop-title">Choose a LibraryThing export</span>
+        <span class="file-drop-sub">or drag and drop it here</span>
+      </label>
+
+      <details class="paste-panel">
+        <summary>Or paste ISBNs instead</summary>
+        <label for="isbnPaste">One ISBN per line, or paste text containing ISBN-10/ISBN-13 values.</label>
+        <textarea id="isbnPaste" rows="6" placeholder="9780140328721&#10;9780061120084"></textarea>
+        <button id="loadPasteButton" class="button secondary" type="button">Load pasted ISBNs</button>
+      </details>
+
+      <div id="loadMessage" class="status-line" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="card" aria-labelledby="step2-title">
+      <div class="step-heading">
+        <span class="step-number">2</span>
+        <div>
+          <h2 id="step2-title">Find Dewey numbers</h2>
+          <p>The lookup uses exact ISBN matching, batches requests, waits between requests, and caches results locally.</p>
+        </div>
+      </div>
+
+      <div class="summary-grid" id="summaryGrid">
+        <div><strong id="bookCount">0</strong><span>records</span></div>
+        <div><strong id="isbnCount">0</strong><span>with valid ISBNs</span></div>
+        <div><strong id="currentDeweyCount">0</strong><span>with current Dewey</span></div>
+        <div><strong id="cachedCount">0</strong><span>cached lookups</span></div>
+      </div>
+
+      <div class="button-row">
+        <button id="lookupButton" class="button primary" type="button" disabled>Find Dewey numbers</button>
+        <button id="cancelButton" class="button danger" type="button" hidden>Cancel</button>
+        <button id="clearCacheButton" class="button quiet" type="button">Clear lookup cache</button>
+      </div>
+
+      <div id="progressArea" class="progress-area" hidden>
+        <progress id="progressBar" value="0" max="100"></progress>
+        <p id="progressText" class="status-line" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="step3-title">
+      <div class="step-heading">
+        <span class="step-number">3</span>
+        <div>
+          <h2 id="step3-title">Review suggestions</h2>
+          <p>A Dewey candidate is a starting point, not an automatic cataloguing decision. Multiple or conflicting values are flagged for review.</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <label>
+          Show
+          <select id="filterSelect">
+            <option value="all">All records</option>
+            <option value="suggested">Has Dewey suggestion</option>
+            <option value="review">Needs review</option>
+            <option value="no-dewey">Book found, no Dewey</option>
+            <option value="not-found">No Open Library match</option>
+            <option value="missing-isbn">Missing/invalid ISBN</option>
+          </select>
+        </label>
+        <span id="resultCount" class="muted"></span>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Title</th>
+              <th>Author</th>
+              <th>ISBN</th>
+              <th>Current Dewey</th>
+              <th>Suggested Dewey</th>
+              <th>Evidence</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody">
+            <tr><td colspan="7" class="empty-state">Load a catalogue to begin.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination" id="pagination" hidden>
+        <button id="prevPage" class="button quiet" type="button">Previous</button>
+        <span id="pageLabel"></span>
+        <button id="nextPage" class="button quiet" type="button">Next</button>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="step4-title">
+      <div class="step-heading">
+        <span class="step-number">4</span>
+        <div>
+          <h2 id="step4-title">Export your reviewed file</h2>
+          <p>The original columns are kept and Dewey Helper columns are appended. Your source file is never overwritten.</p>
+        </div>
+      </div>
+
+      <div class="button-row">
+        <button id="exportTsv" class="button secondary" type="button" disabled>Download TSV</button>
+        <button id="exportCsv" class="button secondary" type="button" disabled>Download CSV</button>
+        <button id="exportJson" class="button secondary" type="button" disabled>Download JSON</button>
+      </div>
+
+      <p class="small muted">This tool does not write back to LibraryThing because LibraryThing does not currently provide a supported member-book editing API.</p>
+    </section>
+
+    <section class="card compact">
+      <h2>How to use the result safely</h2>
+      <ol>
+        <li>Prioritise rows marked <strong>High confidence</strong>, then review conflicting classifications.</li>
+        <li>Check local cataloguing policy before replacing an existing call number.</li>
+        <li>Use the exported file as a working list while editing LibraryThing manually.</li>
+        <li>Keep your original LibraryThing export as a backup.</li>
+      </ol>
+      <p class="small">Not affiliated with LibraryThing, OCLC, Open Library or the Internet Archive. DDC and Dewey Decimal Classification are OCLC trademarks.</p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>Dewey Helper · open source · <a href="https://github.com/joshualparris/dewey-converter-for-librarything">GitHub</a></p>
+    </div>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
