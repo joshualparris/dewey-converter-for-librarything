@@ -824,7 +824,7 @@ function pickValue(row, headerMap, candidates) {
 
 function extractIsbnCandidates(value) {
   const text = String(value || "").toUpperCase();
-  const pattern = /(^|[^0-9X])((?:97[89](?:[-\\s]?\\d){10})|(?:\\d(?:[-\\s]?\\d){8}[-\\s]?[\\dX]))(?=$|[^0-9X])/g;
+  const pattern = /(^|[^0-9X])((?:97[89](?:[-\s]?\d){10})|(?:\d(?:[-\s]?\d){8}[-\s]?[\dX]))(?=$|[^0-9X])/g;
   const candidates = [];
   let match;
 
