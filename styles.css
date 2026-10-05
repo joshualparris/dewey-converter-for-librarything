@@ -332,3 +332,22 @@ tbody tr:last-child td { border-bottom: 0; }
   .summary-grid { grid-template-columns: 1fr; }
   .button-row .button { width: 100%; }
 }
+
+.librarything-actions {
+  min-width: 190px;
+}
+.librarything-actions .button {
+  margin-bottom: 8px;
+}
+.completed-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: .82rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.completed-toggle input {
+  width: 17px;
+  height: 17px;
+}
