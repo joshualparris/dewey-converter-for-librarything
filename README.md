@@ -8,7 +8,7 @@ This project is the 2026 successor to the original `dewey-converter-for-libraryt
 
 ## What it does
 
-1. Export your own LibraryThing catalogue as **Tab-Delimited Text** or **JSON**.
+1. Export your own LibraryThing catalogue as **Excel (.xlsx)**, Tab-Delimited Text, CSV or JSON.
 2. Open Dewey Helper in your browser and select the export.
 3. The app extracts ISBNs locally.
 4. When you press **Find Dewey numbers**, it sends batched ISBN lookups to Open Library.
@@ -22,6 +22,7 @@ Your original export is never modified.
 
 - No LibraryThing username or password is required.
 - Your catalogue file is parsed in your browser, not uploaded to this project.
+- Excel files are parsed client-side with SheetJS Community Edition 0.20.3, loaded from SheetJS's pinned official CDN.
 - ISBNs are sent to Open Library only after you start a lookup.
 - Results are cached locally in your browser to reduce repeat API traffic.
 - This project does **not** scrape LibraryThing and does **not** automate catalogue editing.
@@ -48,7 +49,7 @@ A result is a **cataloguing aid, not an authority record**. DDC can vary by edit
 
 ## LibraryThing export
 
-LibraryThing currently offers Excel, Tab-Delimited Text, JSON and MARC exports at https://www.librarything.com/export. **Tab-Delimited Text is recommended** here because it contains rich catalogue fields and is easy to process without third-party code.
+LibraryThing currently offers Excel, Tab-Delimited Text, JSON and MARC exports at https://www.librarything.com/export. **Excel (.xlsx) now works directly** in Dewey Helper, as do Tab-Delimited Text, CSV and JSON exports.
 
 Typical LibraryThing export fields include:
 
@@ -87,6 +88,7 @@ You can also open `index.html` directly, although browsers sometimes apply stric
 - human review before catalogue changes;
 - accessible to non-programmers;
 - minimal dependencies;
+- pinned SheetJS Community Edition only for Excel import;
 - respectful API usage.
 
 ## Limitations
@@ -97,7 +99,7 @@ This tool currently does not write data back into LibraryThing. A supported Libr
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Third-party software notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Disclaimer
 
