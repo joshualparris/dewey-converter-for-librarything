@@ -100,8 +100,12 @@
           Show
           <select id="filterSelect">
             <option value="all">All records</option>
-            <option value="suggested">Has Dewey suggestion</option>
+            <option value="exact-changed">Exact edition · different DDC</option>
+            <option value="missing-current">Missing current DDC</option>
             <option value="review">Needs review</option>
+            <option value="already-correct">Already correct</option>
+            <option value="completed">Completed</option>
+            <option value="suggested">Has Dewey suggestion</option>
             <option value="no-dewey">Book found, no Dewey</option>
             <option value="not-found">No Open Library match</option>
             <option value="missing-isbn">Missing/invalid ISBN</option>
@@ -121,10 +125,11 @@
               <th>Current Dewey</th>
               <th>Suggested Dewey</th>
               <th>Evidence</th>
+              <th>LibraryThing</th>
             </tr>
           </thead>
           <tbody id="resultsBody">
-            <tr><td colspan="7" class="empty-state">Load a catalogue to begin.</td></tr>
+            <tr><td colspan="8" class="empty-state">Load a catalogue to begin.</td></tr>
           </tbody>
         </table>
       </div>
@@ -151,7 +156,7 @@
         <button id="exportJson" class="button secondary" type="button" disabled>Download JSON</button>
       </div>
 
-      <p class="small muted">This tool does not write back to LibraryThing because LibraryThing does not currently provide a supported member-book editing API.</p>
+      <p class="small muted">This tool does not write back automatically. Use the per-book <strong>Copy DDC + Edit in LibraryThing</strong> button to safely update your own catalogue record, then mark it completed here.</p>
     </section>
 
     <section class="card compact">
