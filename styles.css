@@ -351,3 +351,6 @@ tbody tr:last-child td { border-bottom: 0; }
   width: 17px;
   height: 17px;
 }
+
+.completed-row { opacity: .72; }
+.completed-row .book-title { text-decoration: line-through; text-decoration-thickness: 1px; }
