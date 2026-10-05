@@ -1,11 +1,13 @@
 "use strict";
 
+const OPEN_LIBRARY_BOOKS = "https://openlibrary.org/api/books";
 const OPEN_LIBRARY_SEARCH = "https://openlibrary.org/search.json";
-const CACHE_KEY = "dewey-helper-cache-v1";
+const CACHE_KEY = "dewey-helper-cache-v2";
 const CACHE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const BATCH_SIZE = 20;
 const REQUEST_DELAY_MS = 1100;
 const PAGE_SIZE = 100;
+let lastNetworkRequestAt = 0;
 
 const state = {
   headers: [],
@@ -254,9 +256,6 @@ async function runLookup() {
       updateProgress(resolved, uniqueIsbns.length, `Processed ${resolved.toLocaleString()} of ${uniqueIsbns.length.toLocaleString()} unique ISBNs.`);
       renderTable();
 
-      if (i < batches.length - 1 && !state.cancelled) {
-        await sleep(REQUEST_DELAY_MS);
-      }
     }
 
     if (state.cancelled) {
@@ -275,6 +274,100 @@ async function runLookup() {
 }
 
 async function lookupBatch(isbns) {
+  const exact = await lookupExactEditionBatch(isbns);
+  const unresolved = isbns.filter(isbn => {
+    const result = exact.get(isbn);
+    return !result || result.status === "not-found" || result.status === "no-dewey";
+  });
+
+  if (!unresolved.length) return exact;
+
+  const workFallback = await lookupWorkBatch(unresolved);
+
+  for (const isbn of unresolved) {
+    const editionResult = exact.get(isbn);
+    const workResult = workFallback.get(isbn);
+
+    if (!workResult || workResult.status === "not-found" || workResult.status === "no-dewey") {
+      if (!editionResult && workResult) exact.set(isbn, workResult);
+      continue;
+    }
+
+    const exactEditionFound = editionResult?.status === "no-dewey";
+    exact.set(isbn, {
+      ...workResult,
+      status: "review",
+      confidence: "review",
+      source: exactEditionFound
+        ? "Open Library work-level fallback after exact edition match"
+        : "Open Library work-level fallback",
+      note: exactEditionFound
+        ? "The exact edition was found, but it has no Dewey value in Open Library. These candidate values are aggregated from editions of the same work and need librarian review."
+        : "No edition-level Dewey value was returned. These candidate values are aggregated from editions of the ISBN-matched work and need librarian review."
+    });
+  }
+
+  return exact;
+}
+
+async function lookupExactEditionBatch(isbns) {
+  const params = new URLSearchParams({
+    bibkeys: isbns.map(isbn => `ISBN:${isbn}`).join(","),
+    jscmd: "data",
+    format: "json"
+  });
+
+  const response = await respectfulFetch(`${OPEN_LIBRARY_BOOKS}?${params.toString()}`);
+  const data = await response.json();
+  const result = new Map();
+
+  for (const isbn of isbns) {
+    const book = data[`ISBN:${isbn}`];
+
+    if (!book) {
+      result.set(isbn, makeNotFoundResolution());
+      continue;
+    }
+
+    const rawDeweys = book.classifications?.dewey_decimal_class;
+    const values = (Array.isArray(rawDeweys) ? rawDeweys : rawDeweys ? [rawDeweys] : [])
+      .map(cleanDewey)
+      .filter(Boolean);
+    const deweys = [...new Set(values)];
+    const sourceUrl = cleanText(book.url || book.info_url);
+
+    if (!deweys.length) {
+      result.set(isbn, {
+        status: "no-dewey",
+        suggestedDewey: "",
+        alternatives: [],
+        confidence: "",
+        source: "Open Library exact edition",
+        sourceUrl,
+        sourceTitle: cleanText(book.title),
+        note: "Exact ISBN edition found, but Open Library does not list a Dewey value for this edition."
+      });
+      continue;
+    }
+
+    result.set(isbn, {
+      status: deweys.length === 1 ? "suggested" : "review",
+      suggestedDewey: deweys[0],
+      alternatives: deweys.slice(1),
+      confidence: deweys.length === 1 ? "high" : "review",
+      source: "Open Library exact edition",
+      sourceUrl,
+      sourceTitle: cleanText(book.title),
+      note: deweys.length === 1
+        ? "Dewey value returned for this exact ISBN edition."
+        : "This exact edition has multiple Dewey values in Open Library; review before applying one."
+    });
+  }
+
+  return result;
+}
+
+async function lookupWorkBatch(isbns) {
   const query = `isbn:(${isbns.map(isbn => `"${isbn}"`).join(" OR ")})`;
   const params = new URLSearchParams({
     q: query,
@@ -282,17 +375,7 @@ async function lookupBatch(isbns) {
     limit: "100"
   });
 
-  const response = await fetch(`${OPEN_LIBRARY_SEARCH}?${params.toString()}`, {
-    headers: { "Accept": "application/json" }
-  });
-
-  if (response.status === 429) {
-    throw new Error("Open Library rate limit reached. Wait a little and try again.");
-  }
-  if (!response.ok) {
-    throw new Error(`Open Library returned HTTP ${response.status}`);
-  }
-
+  const response = await respectfulFetch(`${OPEN_LIBRARY_SEARCH}?${params.toString()}`);
   const data = await response.json();
   const wanted = new Set(isbns);
   const docsByIsbn = new Map(isbns.map(isbn => [isbn, []]));
@@ -309,12 +392,31 @@ async function lookupBatch(isbns) {
 
   const result = new Map();
   for (const isbn of isbns) {
-    result.set(isbn, resolveDocs(docsByIsbn.get(isbn) || []));
+    result.set(isbn, resolveWorkDocs(docsByIsbn.get(isbn) || []));
   }
   return result;
 }
 
-function resolveDocs(docs) {
+async function respectfulFetch(url) {
+  const elapsed = Date.now() - lastNetworkRequestAt;
+  const waitMs = Math.max(0, REQUEST_DELAY_MS - elapsed);
+  if (waitMs) await sleep(waitMs);
+
+  const response = await fetch(url, {
+    headers: { "Accept": "application/json" }
+  });
+  lastNetworkRequestAt = Date.now();
+
+  if (response.status === 429) {
+    throw new Error("Open Library rate limit reached. Wait a little and try again.");
+  }
+  if (!response.ok) {
+    throw new Error(`Open Library returned HTTP ${response.status}`);
+  }
+  return response;
+}
+
+function resolveWorkDocs(docs) {
   if (!docs.length) return makeNotFoundResolution();
 
   const ddcValues = [];
@@ -330,59 +432,43 @@ function resolveDocs(docs) {
   const sourceUrl = bestDoc?.key
     ? `https://openlibrary.org${String(bestDoc.key).startsWith("/") ? "" : "/works/"}${bestDoc.key}`
     : "";
+  const unique = [...new Set(ddcValues)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
-  if (!ddcValues.length) {
+  if (!unique.length) {
     return {
       status: "no-dewey",
       suggestedDewey: "",
       alternatives: [],
       confidence: "",
-      source: "Open Library exact ISBN match",
+      source: "Open Library ISBN-matched work",
       sourceUrl,
       sourceTitle: cleanText(bestDoc?.title),
-      note: "Book found by ISBN, but Open Library did not return a Dewey value."
+      note: "Book work found by ISBN, but Open Library did not return a Dewey value."
     };
   }
 
-  const counts = new Map();
-  for (const value of ddcValues) counts.set(value, (counts.get(value) || 0) + 1);
-
-  const ranked = [...counts.entries()].sort((a, b) => {
-    if (b[1] !== a[1]) return b[1] - a[1];
-    if (a[0].length !== b[0].length) return a[0].length - b[0].length;
-    return a[0].localeCompare(b[0]);
-  });
-
-  const [chosen, chosenCount] = ranked[0];
-  const alternatives = ranked.slice(1).map(([value]) => value);
-  const totalUnique = ranked.length;
-
-  let confidence = "high";
-  let status = "suggested";
-  let note = "One Dewey value was returned for this ISBN match.";
-
-  if (totalUnique > 1) {
-    const secondCount = ranked[1][1];
-    if (chosenCount > secondCount) {
-      confidence = "medium";
-      status = "review";
-      note = `Multiple Dewey values were found; ${chosen} appeared most often.`;
-    } else {
-      confidence = "review";
-      status = "review";
-      note = "Multiple Dewey values were returned with no clear winner.";
-    }
+  if (unique.length === 1) {
+    return {
+      status: "review",
+      suggestedDewey: unique[0],
+      alternatives: [],
+      confidence: "review",
+      source: "Open Library work-level DDC",
+      sourceUrl,
+      sourceTitle: cleanText(bestDoc?.title),
+      note: "One work-level Dewey candidate was found. Open Library aggregates work DDC values across editions, so review it before applying it to this edition."
+    };
   }
 
   return {
-    status,
-    suggestedDewey: chosen,
-    alternatives,
-    confidence,
-    source: "Open Library exact ISBN match",
+    status: "review",
+    suggestedDewey: "",
+    alternatives: unique,
+    confidence: "review",
+    source: "Open Library work-level DDC",
     sourceUrl,
     sourceTitle: cleanText(bestDoc?.title),
-    note
+    note: "Multiple work-level Dewey candidates were found. Open Library aggregates DDC values across editions, so no single candidate was selected automatically."
   };
 }
 
@@ -503,7 +589,7 @@ function renderRow(record) {
   if (record.alternatives.length) {
     const alt = document.createElement("div");
     alt.className = "subtle";
-    alt.textContent = `Also: ${record.alternatives.join(", ")}`;
+    alt.textContent = `${record.suggestedDewey ? "Also" : "Candidates"}: ${record.alternatives.join(", ")}`;
     suggestedTd.appendChild(alt);
   }
 
@@ -738,10 +824,15 @@ function pickValue(row, headerMap, candidates) {
 
 function extractIsbnCandidates(value) {
   const text = String(value || "").toUpperCase();
-  const rough = text.match(/(?:97[89][\d\s-]{10,20}\d|[\d][\d\s-]{7,18}[\dX])/g) || [];
-  return rough
-    .map(normalizeIsbn)
-    .filter(isbn => isbn.length === 10 || isbn.length === 13);
+  const pattern = /(^|[^0-9X])((?:97[89](?:[-\\s]?\\d){10})|(?:\\d(?:[-\\s]?\\d){8}[-\\s]?[\\dX]))(?=$|[^0-9X])/g;
+  const candidates = [];
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    candidates.push(normalizeIsbn(match[2]));
+  }
+
+  return candidates.filter(isbn => isbn.length === 10 || isbn.length === 13);
 }
 
 function normalizeIsbn(value) {
@@ -767,7 +858,12 @@ function isValidIsbn(isbn) {
 }
 
 function cleanDewey(value) {
-  return cleanText(value).replace(/^DDC\s*/i, "");
+  const cleaned = cleanText(value)
+    .replace(/^DDC\s*/i, "")
+    .replace(/\//g, "")
+    .replace(/\s+/g, "");
+
+  return /^\d{3}(?:\.\d+)?$/.test(cleaned) ? cleaned : "";
 }
 
 function cleanText(value) {
