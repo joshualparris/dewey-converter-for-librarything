@@ -193,6 +193,7 @@ textarea {
 .button.secondary:hover:not(:disabled) { background: #d9e9e1; }
 .button.danger { background: #fff0ef; color: var(--bad); border-color: #e8c2be; }
 .button.quiet { background: transparent; color: var(--brand); border-color: var(--line); }
+.button.link-button { text-decoration: none; display: inline-flex; align-items: center; }
 
 .summary-grid {
   display: grid;
