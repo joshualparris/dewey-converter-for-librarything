@@ -1,5 +1,7 @@
 # Dewey Helper for LibraryThing
 
+**Use it now:** https://dewey-helper.vercel.app
+
 A free, open-source browser tool for librarians and small libraries who want to review Dewey Decimal Classification (DDC) values in a LibraryThing catalogue.
 
 This project is the 2026 successor to the original `dewey-converter-for-librarything` idea. The old workflow depended on OCLC Classify, which was discontinued in 2024, and on automating LibraryThing catalogue edits. The replacement deliberately avoids scraping or automated LibraryThing logins.
