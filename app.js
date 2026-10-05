@@ -2,12 +2,14 @@
 
 const OPEN_LIBRARY_BOOKS = "https://openlibrary.org/api/books";
 const OPEN_LIBRARY_SEARCH = "https://openlibrary.org/search.json";
+const SHEETJS_URL = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
 const CACHE_KEY = "dewey-helper-cache-v2";
 const CACHE_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const BATCH_SIZE = 20;
 const REQUEST_DELAY_MS = 1100;
 const PAGE_SIZE = 100;
 let lastNetworkRequestAt = 0;
+let sheetJsPromise = null;
 
 const state = {
   headers: [],
@@ -99,16 +101,21 @@ els.exportJson.addEventListener("click", exportJson);
 async function loadFile(file) {
   setLoadMessage("Reading file…");
   try {
-    const text = await file.text();
     const lower = file.name.toLowerCase();
     let parsed;
 
-    if (lower.endsWith(".json") || looksLikeJson(text)) {
-      parsed = parseJsonExport(text);
+    if (/\.(xlsx|xls|xlsb)$/.test(lower)) {
+      setLoadMessage("Reading Excel export locally in your browser…");
+      parsed = await parseExcelExport(file);
     } else {
-      const delimiter = detectDelimiter(text);
-      parsed = parseDelimitedExport(text, delimiter);
-      state.delimiter = delimiter;
+      const text = await file.text();
+      if (lower.endsWith(".json") || looksLikeJson(text)) {
+        parsed = parseJsonExport(text);
+      } else {
+        const delimiter = detectDelimiter(text);
+        parsed = parseDelimitedExport(text, delimiter);
+        state.delimiter = delimiter;
+      }
     }
 
     ingestRows(parsed.headers, parsed.rows, file.name);
@@ -699,6 +706,104 @@ function exportJson() {
   }));
 
   downloadBlob(JSON.stringify(output, null, 2), "dewey-helper-results.json", "application/json;charset=utf-8");
+}
+
+async function parseExcelExport(file) {
+  const XLSX = await loadSheetJs();
+  const bytes = await file.arrayBuffer();
+  const workbook = XLSX.read(bytes, {
+    type: "array",
+    dense: true,
+    cellDates: false
+  });
+
+  if (!workbook.SheetNames?.length) {
+    throw new Error("The Excel workbook does not contain any worksheets.");
+  }
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const matrix = XLSX.utils.sheet_to_json(sheet, {
+      header: 1,
+      defval: "",
+      raw: false,
+      blankrows: false
+    });
+
+    const rows = matrix.filter(row =>
+      Array.isArray(row) && row.some(cell => cleanText(cell) !== "")
+    );
+    if (rows.length < 2) continue;
+
+    const headerIndex = findLibraryThingHeaderRow(rows);
+    const headers = dedupeHeaders(
+      rows[headerIndex].map((value, index) => cleanText(value) || `Column_${index + 1}`)
+    );
+
+    const objects = rows.slice(headerIndex + 1)
+      .filter(cells => cells.some(cell => cleanText(cell) !== ""))
+      .map(cells => {
+        const row = {};
+        headers.forEach((header, index) => {
+          row[header] = cells[index] == null ? "" : cleanText(cells[index]);
+        });
+        return row;
+      });
+
+    if (objects.length) {
+      return { headers, rows: objects };
+    }
+  }
+
+  throw new Error("I could not find catalogue rows in this Excel workbook.");
+}
+
+function findLibraryThingHeaderRow(matrix) {
+  const maxRows = Math.min(matrix.length, 15);
+
+  for (let i = 0; i < maxRows; i += 1) {
+    const names = new Set(matrix[i].map(normalizeHeader));
+    const hasTitle = names.has("title");
+    const hasIsbn = names.has("isbn") || names.has("isbns");
+    const hasCatalogueField =
+      names.has("bookid") ||
+      names.has("deweydecimal") ||
+      names.has("primaryauthor");
+
+    if (hasTitle && hasIsbn && hasCatalogueField) return i;
+  }
+
+  return 0;
+}
+
+function loadSheetJs() {
+  if (globalThis.XLSX) return Promise.resolve(globalThis.XLSX);
+  if (sheetJsPromise) return sheetJsPromise;
+
+  sheetJsPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = SHEETJS_URL;
+    script.async = true;
+    script.crossOrigin = "anonymous";
+
+    script.addEventListener("load", () => {
+      if (globalThis.XLSX) {
+        resolve(globalThis.XLSX);
+      } else {
+        sheetJsPromise = null;
+        reject(new Error("The Excel reader loaded but did not initialise."));
+      }
+    });
+
+    script.addEventListener("error", () => {
+      sheetJsPromise = null;
+      reject(new Error("Could not load the Excel reader. Check your internet connection, or export Tab-Delimited Text from LibraryThing instead."));
+    });
+
+    document.head.appendChild(script);
+  });
+
+  return sheetJsPromise;
 }
 
 function parseDelimitedExport(text, delimiter) {
