@@ -24,7 +24,7 @@
     <section class="notice" aria-labelledby="privacy-title">
       <div>
         <h2 id="privacy-title">Your catalogue stays on your device</h2>
-        <p>The file is parsed in this browser. Only ISBNs are sent to the Open Library API when you press <strong>Find Dewey numbers</strong>. No LibraryThing password is needed or accepted.</p>
+        <p>The file is parsed in this browser. Excel parsing uses SheetJS Community Edition locally in the page; your workbook is not uploaded to this project. Only ISBNs are sent to Open Library when you press <strong>Find Dewey numbers</strong>. No LibraryThing password is needed or accepted.</p>
       </div>
     </section>
 
@@ -33,12 +33,12 @@
         <span class="step-number">1</span>
         <div>
           <h2 id="step1-title">Load your catalogue</h2>
-          <p>In LibraryThing choose <strong>Export → Tab-Delimited Text</strong> or JSON. TSV is recommended.</p>
+          <p>Use the normal LibraryThing <strong>Excel (.xlsx)</strong>, Tab-Delimited Text, CSV or JSON export. Excel files work directly.</p>
         </div>
       </div>
 
       <label class="file-drop" id="dropZone">
-        <input id="fileInput" type="file" accept=".tsv,.txt,.csv,.json,text/tab-separated-values,text/csv,application/json">
+        <input id="fileInput" type="file" accept=".xlsx,.xls,.xlsb,.tsv,.txt,.csv,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/tab-separated-values,text/csv,application/json">
         <span class="file-drop-title">Choose a LibraryThing export</span>
         <span class="file-drop-sub">or drag and drop it here</span>
       </label>
